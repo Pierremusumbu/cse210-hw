@@ -1,209 +1,329 @@
 using System;
-
 using System.Collections.Generic;
-using System.Threading;
+using System.IO;
 
-abstract class Activity
+abstract class Goal
 {
-    protected string Name;
-    protected string Description;
-    protected int Duration;
+    protected string _name;
+    protected string _description;
+    protected int _points;
 
-    public void Start()
+    public string Name => _name;
+    public string Description => _description;
+
+    public Goal(string name, string description, int points)
     {
-        Console.Clear();
-        Console.WriteLine($"Starting: {Name}");
-        Console.WriteLine(Description);
-        Console.Write("Enter duration in seconds: ");
-        Duration = int.Parse(Console.ReadLine());
-        Console.WriteLine("Prepare to begin...");
-        Spinner(3);
-        RunActivity();
-        End();
+        _name = name;
+        _description = description;
+        _points = points;
     }
 
-    protected abstract void RunActivity();
+    public abstract int RecordEvent();
+    public abstract bool IsComplete();
+    public abstract string GetStringRepresentation();
+    public abstract string GetStatus();
+}
 
-    protected void End()
+class SimpleGoal : Goal
+{
+    private bool _isComplete;
+
+    public SimpleGoal(string name, string description, int points) : base(name, description, points)
     {
-        Console.WriteLine("\nWell done!");
-        Spinner(2);
-        Console.WriteLine($"You have completed the {Name} activity for {Duration} seconds.");
-        Spinner(3);
+        _isComplete = false;
     }
 
-    protected void Countdown(int seconds)
+    public override int RecordEvent()
     {
-        for (int i = seconds; i > 0; i--)
+        if (!_isComplete)
         {
-            Console.Write(i + "... ");
-            Thread.Sleep(1000);
+            _isComplete = true;
+            return _points;
         }
-        Console.WriteLine();
+        return 0;
     }
 
-    protected void Spinner(int duration)
+    public override bool IsComplete()
     {
-        string[] symbols = { "|", "/", "-", "\\" };
-        int end = Environment.TickCount + duration * 1000;
-        int i = 0;
+        return _isComplete;
+    }
 
-        while (Environment.TickCount < end)
-        {
-            Console.Write(symbols[i++ % symbols.Length] + "\r");
-            Thread.Sleep(200);
-        }
-        Console.Write(" \r");
+    public override string GetStringRepresentation()
+    {
+        return $"SimpleGoal|{_name}|{_description}|{_points}|{_isComplete}";
+    }
+
+    public override string GetStatus()
+    {
+        return _isComplete ? "[X]" : "[ ]";
     }
 }
 
-class BreathingActivity : Activity
+class EternalGoal : Goal
 {
-    public BreathingActivity()
+    public EternalGoal(string name, string description, int points) : base(name, description, points)
     {
-        Name = "Breathing";
-        Description = "This activity will help you relax by walking you through breathing in and out slowly. Clear your mind and focus on your breathing.";
     }
 
-    protected override void RunActivity()
+    public override int RecordEvent()
     {
-        int elapsed = 0;
-        while (elapsed < Duration)
-        {
-            Console.WriteLine("Breathe in...");
-            Countdown(4);
-            elapsed += 4;
+        return _points;
+    }
 
-            if (elapsed >= Duration) break;
+    public override bool IsComplete()
+    {
+        return false;
+    }
 
-            Console.WriteLine("Breathe out...");
-            Countdown(6);
-            elapsed += 6;
-        }
+    public override string GetStringRepresentation()
+    {
+        return $"EternalGoal|{_name}|{_description}|{_points}";
+    }
+
+    public override string GetStatus()
+    {
+        return "[∞]";
     }
 }
 
-class ReflectionActivity : Activity
+class ChecklistGoal : Goal
 {
-    private List<string> prompts = new List<string>
-    {
-        "Think of a time when you stood up for someone else.",
-        "Think of a time when you did something really difficult.",
-        "Think of a time when you helped someone in need.",
-        "Think of a time when you did something truly selfless."
-    };
+    private int _targetCount;
+    private int _currentCount;
+    private int _bonusPoints;
 
-    private List<string> questions = new List<string>
+    public ChecklistGoal(string name, string description, int points, int targetCount, int bonusPoints)
+        : base(name, description, points)
     {
-        "Why was this experience meaningful to you?",
-        "Have you ever done anything like this before?",
-        "How did you get started?",
-        "How did you feel when it was complete?",
-        "What made this time different than other times when you were not as successful?",
-        "What is your favorite thing about this experience?",
-        "What could you learn from this experience that applies to other situations?",
-        "What did you learn about yourself through this experience?",
-        "How can you keep this experience in mind in the future?"
-    };
-
-    public ReflectionActivity()
-    {
-        Name = "Reflection";
-        Description = "This activity will help you reflect on times in your life when you have shown strength and resilience.";
+        _targetCount = targetCount;
+        _bonusPoints = bonusPoints;
+        _currentCount = 0;
     }
 
-    protected override void RunActivity()
+    public override int RecordEvent()
     {
-        Random rand = new Random();
-        Console.WriteLine($"\nPrompt: {prompts[rand.Next(prompts.Count)]}");
-        Console.WriteLine("Reflect on the following questions:");
-
-        int elapsed = 0;
-        while (elapsed < Duration)
+        _currentCount++;
+        if (_currentCount == _targetCount)
         {
-            string question = questions[rand.Next(questions.Count)];
-            Console.WriteLine($"\n> {question}");
-            Spinner(5);
-            elapsed += 5;
+            return _points + _bonusPoints;
         }
+        return _points;
+    }
+
+    public override bool IsComplete()
+    {
+        return _currentCount >= _targetCount;
+    }
+
+    public override string GetStringRepresentation()
+    {
+        return $"ChecklistGoal|{_name}|{_description}|{_points}|{_targetCount}|{_bonusPoints}|{_currentCount}";
+    }
+
+    public override string GetStatus()
+    {
+        return $"[{_currentCount}/{_targetCount}]";
     }
 }
 
-class ListingActivity : Activity
+class GoalManager
 {
-    private List<string> prompts = new List<string>
-    {
-        "Who are people that you appreciate?",
-        "What are personal strengths of yours?",
-        "Who are people that you have helped this week?",
-        "When have you felt the Holy Ghost this month?",
-        "Who are some of your personal heroes?"
-    };
+    private List<Goal> _goals = new List<Goal>();
+    private int _score = 0;
+    private int _level = 1;
 
-    public ListingActivity()
+    public void AddGoal(Goal goal)
     {
-        Name = "Listing";
-        Description = "This activity will help you reflect on the good things in your life by having you list as many things as you can in a certain area.";
+        _goals.Add(goal);
     }
 
-    protected override void RunActivity()
+    public void RecordEvent(int goalIndex)
     {
-        Random rand = new Random();
-        Console.WriteLine($"\nPrompt: {prompts[rand.Next(prompts.Count)]}");
-        Console.WriteLine("You have a few seconds to think...");
-        Countdown(5);
-
-        Console.WriteLine("Start listing. Press Enter after each item:");
-        DateTime endTime = DateTime.Now.AddSeconds(Duration);
-        int count = 0;
-
-        while (DateTime.Now < endTime)
+        if (goalIndex >= 0 && goalIndex < _goals.Count)
         {
-            if (!string.IsNullOrEmpty(Console.ReadLine()))
-                count++;
+            int pointsEarned = _goals[goalIndex].RecordEvent();
+            _score += pointsEarned;
+            Console.WriteLine($"You earned {pointsEarned} points!");
+            LevelUp();
         }
+        else
+        {
+            Console.WriteLine("Invalid goal index.");
+        }
+    }
 
-        Console.WriteLine($"\nYou listed {count} items!");
+    private void LevelUp()
+    {
+        int newLevel = (_score / 500) + 1;
+        if (newLevel > _level)
+        {
+            _level = newLevel;
+            Console.WriteLine($"Congratulations! You've leveled up to Level {_level}!");
+        }
+    }
+
+    public void DisplayGoals()
+    {
+        for (int i = 0; i < _goals.Count; i++)
+        {
+            Goal g = _goals[i];
+            Console.WriteLine($"{i + 1}. {g.GetStatus()} {g.Name} — {g.Description}");
+        }
+    }
+
+    public void DisplayScore()
+    {
+        Console.WriteLine($"Current Score: {_score} points | Level: {_level}");
+    }
+
+    public void SaveGoals(string filename)
+    {
+        using (StreamWriter outputFile = new StreamWriter(filename))
+        {
+            outputFile.WriteLine(_score);
+            foreach (Goal goal in _goals)
+            {
+                outputFile.WriteLine(goal.GetStringRepresentation());
+            }
+        }
+    }
+
+    public void LoadGoals(string filename)
+    {
+        if (File.Exists(filename))
+        {
+            string[] lines = File.ReadAllLines(filename);
+            _score = int.Parse(lines[0]);
+            _goals.Clear();
+            for (int i = 1; i < lines.Length; i++)
+            {
+                string[] parts = lines[i].Split('|');
+                string type = parts[0];
+                if (type == "SimpleGoal")
+                {
+                    var goal = new SimpleGoal(parts[1], parts[2], int.Parse(parts[3]));
+                    if (bool.Parse(parts[4]))
+                    {
+                        goal.RecordEvent(); // Mark complete if needed
+                    }
+                    _goals.Add(goal);
+                }
+                else if (type == "EternalGoal")
+                {
+                    var goal = new EternalGoal(parts[1], parts[2], int.Parse(parts[3]));
+                    _goals.Add(goal);
+                }
+                else if (type == "ChecklistGoal")
+                {
+                    var goal = new ChecklistGoal(parts[1], parts[2], int.Parse(parts[3]), int.Parse(parts[4]), int.Parse(parts[5]));
+                    for (int j = 0; j < int.Parse(parts[6]); j++)
+                    {
+                        goal.RecordEvent();
+                    }
+                    _goals.Add(goal);
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("File not found.");
+        }
     }
 }
 
 class Program
 {
-    static void Main()
+    static void Main(string[] args)
     {
-        while (true)
+        GoalManager manager = new GoalManager();
+        bool quit = false;
+
+        while (!quit)
         {
-            Console.Clear();
-            Console.WriteLine("Mindfulness Program");
-            Console.WriteLine("1. Breathing Activity");
-            Console.WriteLine("2. Reflection Activity");
-            Console.WriteLine("3. Listing Activity");
-            Console.WriteLine("4. Exit");
+            Console.WriteLine("\nEternal Quest Menu:");
+            Console.WriteLine("1. Create New Goal");
+            Console.WriteLine("2. List Goals");
+            Console.WriteLine("3. Save Goals");
+            Console.WriteLine("4. Load Goals");
+            Console.WriteLine("5. Record Event");
+            Console.WriteLine("6. Display Score");
+            Console.WriteLine("7. Quit");
+
             Console.Write("Choose an option: ");
             string choice = Console.ReadLine();
 
-            Activity activity = choice switch
+            switch (choice)
             {
-                "1" => new BreathingActivity(),
-                "2" => new ReflectionActivity(),
-                "3" => new ListingActivity(),
-                "4" => null,
-                _ => null
-            };
-
-            if (choice == "4")
-            {
-                Console.WriteLine("Goodbye!");
-                break;
+                case "1":
+                    CreateGoal(manager);
+                    break;
+                case "2":
+                    manager.DisplayGoals();
+                    break;
+                case "3":
+                    Console.Write("Enter filename to save: ");
+                    string saveFile = Console.ReadLine();
+                    manager.SaveGoals(saveFile);
+                    break;
+                case "4":
+                    Console.Write("Enter filename to load: ");
+                    string loadFile = Console.ReadLine();
+                    manager.LoadGoals(loadFile);
+                    break;
+                case "5":
+                    manager.DisplayGoals();
+                    Console.Write("Which goal did you accomplish? (Enter number): ");
+                    int goalIndex = int.Parse(Console.ReadLine()) - 1;
+                    manager.RecordEvent(goalIndex);
+                    break;
+                case "6":
+                    manager.DisplayScore();
+                    break;
+                case "7":
+                    quit = true;
+                    break;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
             }
+        }
+    }
 
-            if (activity != null)
-                activity.Start();
-            else
-            {
-                Console.WriteLine("Invalid option. Press Enter to try again.");
-                Console.ReadLine();
-            }
+    static void CreateGoal(GoalManager manager)
+    {
+        Console.WriteLine("Select Goal Type:");
+        Console.WriteLine("1. Simple Goal");
+        Console.WriteLine("2. Eternal Goal");
+        Console.WriteLine("3. Checklist Goal");
+        Console.Write("Choice: ");
+        string type = Console.ReadLine();
+
+        Console.Write("Goal Name: ");
+        string name = Console.ReadLine();
+        Console.Write("Goal Description: ");
+        string description = Console.ReadLine();
+        Console.Write("Points per completion: ");
+        int points = int.Parse(Console.ReadLine());
+
+        if (type == "1")
+        {
+            manager.AddGoal(new SimpleGoal(name, description, points));
+        }
+        else if (type == "2")
+        {
+            manager.AddGoal(new EternalGoal(name, description, points));
+        }
+        else if (type == "3")
+        {
+            Console.Write("How many times to complete: ");
+            int target = int.Parse(Console.ReadLine());
+            Console.Write("Bonus points on completion: ");
+            int bonus = int.Parse(Console.ReadLine());
+            manager.AddGoal(new ChecklistGoal(name, description, points, target, bonus));
+        }
+        else
+        {
+            Console.WriteLine("Invalid goal type.");
         }
     }
 }
